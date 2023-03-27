@@ -1,0 +1,9 @@
+max_future = 3
+max_current = 3
+
+lite_plan = 1
+balanced_plan = 4
+deep_dive_plan = 8
+
+number_primary_actions = 3
+number_secondary_actions = 3
