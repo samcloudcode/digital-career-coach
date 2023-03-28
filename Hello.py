@@ -145,7 +145,7 @@ match ss.state:
 
         # Collect user info
         ss.user_info["name"] = st.text_input(label="How should we address you?",
-                                             placeholder="e.g. Stacey", value='Sam')
+                                             placeholder="e.g. Stacey")
 
         ss.user_info["function"] = st.selectbox(label="Function", options=ss.functions.index.tolist())
 
@@ -161,7 +161,8 @@ match ss.state:
 
         ss.user_info["experience"] = st.text_area(label="Please share your work experience at AIA "
                                                          "and elsewhere in a few lines:",
-                                                  placeholder="I've been working at AIA for 10 years")
+                                                  placeholder="e.g. I've been working at AIA in this team for"
+                                                              " 10 years, previously I worked at...")
 
         if st.button("Next"):
             # Build prompt and change state to next page
