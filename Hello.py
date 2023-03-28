@@ -5,22 +5,7 @@ import toml
 import pandas as pd
 
 
-def reset():
-    """ Resets state back to Intro and clears messages and variables"""
-    ss.state = "Intro"
-    ss.messages = [
-        {"role": "system", "content": ss.prompts.loc['system_message', 'prompt']},
-    ]
-
-    ss.model_reply = ""
-    ss.user_reply = ""
-
-
 def initiate_states():
-    # Set the OpenAI key and page config
-    openai.api_key = st.secrets['SECRET_KEY']
-    st.set_page_config(page_title="AIA Career Advisor", page_icon=":star2:", layout="centered",
-                       initial_sidebar_state="auto", menu_items=None)
 
     # Create default session states
     if 'messages' not in ss:
@@ -79,11 +64,15 @@ def load_questions():
 
 def next_question():
     if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
-        local_prompt = ss.user_reply
-        update_messages(local_prompt)
-        ss.counts = ss.counts + 1
-        ss.user_reply = ""
-        st.session_state["reply"] = ""
+        if len(ss.user_reply) > 10:
+            local_prompt = ss.user_reply
+            update_messages(local_prompt)
+            ss.counts = ss.counts + 1
+            ss.user_reply = ""
+            st.session_state["reply"] = ""
+        else:
+            st.error('To facilitate a more meaningful discussion, '
+                     'please include more information in your response.')
     else:
         ss.state = 'Summary'
         local_prompt = ss.prompts.loc['summary_prompt', 'prompt']
@@ -99,7 +88,7 @@ def update_messages(local_prompt):
 
 def update_model_response():
     """Calls the OpenAI API and updates model_response_display"""
-    print(ss.messages)
+    openai.api_key = st.secrets['SECRET_KEY']
 
     qu_attempts = 1
     while qu_attempts <= 10:
@@ -127,9 +116,13 @@ def update_model_response():
 
 
 # Initiate states and variables
+st.set_page_config(page_title="AIA Career Advisor", page_icon=":star2:", layout="centered",
+                   initial_sidebar_state="collapsed", menu_items=None)
+
 ss = st.session_state
 load_data()
 initiate_states()
+
 
 with open('config.toml', 'r') as f:
     config = toml.load(f)
@@ -148,7 +141,6 @@ match ss.state:
             st.experimental_rerun()
 
     case "About You":
-
         display_headers()
 
         # Collect user info
@@ -159,19 +151,21 @@ match ss.state:
 
         ss.user_info["band"] = st.selectbox(label='Title', options=ss.bands.index.tolist(), index=4)
 
-        ss.user_info["position"] = st.text_input(label="Can you describe your role in more detail?",
-                                                 placeholder="e.g. Head of Culture",
-                                                 value='Head of Culture')
+        ss.user_info["position"] = st.text_input(label="Position",
+                                                 placeholder="e.g. Head of Culture")
+
+        function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
+
+        ss.user_info["function_detail"] = st.text_area(label="Can you describe your role in more detail?",
+                                                       value=function_detail)
 
         ss.user_info["experience"] = st.text_area(label="Please share your work experience at AIA "
                                                          "and elsewhere in a few lines:",
-                                                  value="I've been working at AIA for 10 years in Agency")
-
-        ss.user_info["function_detail"] = ss.functions.loc[ss.user_info["function"], 'function_detail']
+                                                  placeholder="I've been working at AIA for 10 years")
 
         if st.button("Next"):
             # Build prompt and change state to next page
-            ss.state = 'Welcome'
+            ss.state = 'Topic Selection'
             prompt = ss.prompts.loc['intro_prompt', 'prompt']\
                 .format(name=ss.user_info["name"], function=ss.user_info["function"],
                         position=ss.user_info["position"], experience=ss.user_info["experience"],
@@ -185,63 +179,46 @@ match ss.state:
             ss.state = 'Intro'
             st.experimental_rerun()
 
-    case "Welcome":
-        display_headers()
-
-        if ss.model_reply == "":
-            model_response_display = st.empty()
-            update_model_response()
-        else:
-            model_response_display = st.markdown(ss.model_reply)
-
-        if st.button("Next"):
-            ss.state = 'Topic Selection'
-            st.experimental_rerun()
-
     case "Topic Selection":
-
         display_headers()
 
         ss.current_topic['name'] = \
             st.selectbox(label="What topic would you like to discuss?",
                          options=ss.topic_prompts.index.tolist(), on_change=load_questions)
 
-        include_q1 = not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question1'])
-        include_q2 = not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question1'])
-
         max_questions = ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']
         aia_info = ss.topic_prompts.loc[ss.current_topic['name'], 'aia_info']
         question_format = ss.prompts.loc['question_format', 'prompt']
+
+        question_1 = ss.topic_prompts.loc[ss.current_topic['name'], 'question1']
+        question_2 = ss.topic_prompts.loc[ss.current_topic['name'], 'question2']
 
         reply_1 = ""
         reply_2 = ""
 
         if ss.load_questions:
-            if include_q1:
-                st.markdown(ss.topic_prompts.loc[ss.current_topic['name'], 'question1'])
+            if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'description']):
+                st.markdown('**' + ss.topic_prompts.loc[ss.current_topic['name'], 'description'] + '**')
+
+            if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question1']):
+                st.markdown(question_1)
                 reply_1 = st.text_area("Reply 1", label_visibility='collapsed')
-            if include_q2:
-                st.markdown(ss.topic_prompts.loc[ss.current_topic['name'], 'question2'])
+
+            if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question2']):
+                st.markdown(question_2)
                 reply_2 = st.text_area("Reply 2", label_visibility='collapsed')
 
-        if st.button("Next"):
+        if st.button("Next", type='primary'):
             ss.state = 'Topic Questions'
-            if include_q1 and include_q2:
-                prompt = ss.topic_prompts.loc[ss.current_topic['name'], 'prompt']\
-                    .format(reply_1=reply_1, reply_2=reply_2, aia_info=aia_info, max_questions=max_questions,
-                            question_format=question_format)
-            elif include_q1:
-                prompt = ss.topic_prompts.loc[ss.current_topic['name'], 'prompt'] \
-                    .format(reply_1=reply_1, aia_info=aia_info, max_questions=max_questions,
-                            question_format=question_format)
-            elif include_q2:
-                prompt = ss.topic_prompts.loc[ss.current_topic['name'], 'prompt'] \
-                    .format(reply_2=reply_2, aia_info=aia_info, max_questions=max_questions,
-                            question_format=question_format)
-            else:
-                prompt = ss.topic_prompts.loc[ss.current_topic['name'], 'prompt']\
-                    .format(aia_info=aia_info, max_questions=max_questions, question_format=question_format)
-
+            prompt = ss.prompts.loc['coaching_prompt', 'prompt']\
+                .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
+                        position=ss.user_info["position"], experience=ss.user_info["experience"],
+                        function_detail=ss.user_info["function_detail"],
+                        topic_name=ss.current_topic['name'], aia_info=aia_info,
+                        question_1=question_1, question_2=question_2, reply_1=reply_1, reply_2=reply_2,
+                        question_guidance=ss.topic_prompts.loc[ss.current_topic['name'], 'question_guidance'],
+                        max_questions=max_questions, question_format=question_format)
+            print(prompt)
             update_messages(prompt)
             ss.user_reply = ""
             st.experimental_rerun()
@@ -261,16 +238,18 @@ match ss.state:
 
         if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
             ss.user_reply = st.text_area("Response:", label_visibility='collapsed',
-                                         placeholder="Take your time to think about your reply, it helps to share "
-                                                     "as much detail as possible.", key='reply')
+                                         placeholder="Take your time to think about your reply.",
+                                         key='reply')
 
-        st.button("Next", on_click=next_question)
+        st.button("Next", on_click=next_question, type='primary')
+
         if st.button("Back"):
             st.text("This feature is not implemented yet")
 
-    case "Summary":
-        display_headers()
 
+    case "Summary":
+        st.image('AIA_Group_logo.png', width=120)
+        display_headers()
         if ss.model_reply == "":
             model_response_display = st.empty()
             update_model_response()
@@ -288,74 +267,15 @@ match ss.state:
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Discuss another topic"):
-                ss.state = 'Topic Selection'
-                ss.counts = 1
-                st.experimental_rerun()
-        with col2:
-            if st.button("Send me a copy"):
+            if st.button("Send me a copy", type='primary'):
                 st.text("This feature is not implemented yet")
 
             st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
 
-    case "Topic Action Points":
-        display_headers()
-
-        if ss.model_reply == "":
-            model_response_display = st.empty()
-            update_model_response()
-            st.experimental_rerun()
-        else:
-            print(ss.model_reply)
-            action_points = gfm_table_to_dict(ss.model_reply)
-            print(action_points)
-
-            for index, action in enumerate(action_points['WHAT']):
-                print(index, action)
-                header = '**' + action + '**'
-                with st.expander(label=header, expanded=True):
-
-                    what_key = 'WHAT' + str(index)
-                    how_key = 'HOW' + str(index)
-
-                    st.text_input(label='WHAT', value=action, key=what_key)
-                    st.text_area(label='HOW', value=action_points['HOW'][index], key=how_key, height=150)
-
-            model_response_display = ""
-
-        if st.button("Explore something else"):
-            ss.state = 'Topic Selection'
-            st.experimental_rerun()
-
-        if st.button("Summarise our discussion"):
-            ss.state = 'Report'
-            prompt = ss.prompts.loc['summary_prompt', 'Prompt']
-            update_messages(prompt)
-            st.experimental_rerun()
-
-    case "Report":
-        display_headers()
-
-        if ss.model_reply == "":
-            model_response_display = st.empty()
-            update_model_response()
-        else:
-            model_response_display = st.markdown(ss.model_reply)
-
-        reply_text = ss.user_reply
-        ss.user_reply = st.text_area(label="Response:", key="user_answer",
-                                     label_visibility='collapsed', value=reply_text)
-
-        if st.button("Next"):
-            if ss.counts['current_count'] < config['max_current']:
-                prompt = ss.user_reply
-                update_messages(prompt)
-                ss.counts['current_count'] = ss.counts['current_count'] + 1
-                st.experimental_rerun()
-            else:
-                ss.state = 'Path Options'
-                prompt = ss.user_reply
-                update_messages(prompt)
+        with col2:
+            if st.button("Discuss another topic"):
+                ss.state = 'Topic Selection'
+                ss.counts = 1
                 st.experimental_rerun()
 
 
