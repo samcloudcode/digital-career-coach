@@ -329,7 +329,7 @@ match ss.state:
 
                 updated_html = add_html_blocks(html_file_path, html_blocks)
 
-                if send_email("Team mental health, action plan ideas", updated_html, email_address):
+                if send_email("Career Coach - Discussion Summary and Actions", updated_html, email_address):
                     st.text("Email sent! (Please note this is a demo, formatting will be improved.")
                 else:
                     st.text("Problem with email address provided. Email not sent.")
