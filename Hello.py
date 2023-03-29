@@ -98,7 +98,7 @@ def next_question():
         else:
             st.error('To facilitate a more meaningful discussion, '
                      'please include more information in your response.')
-            st.experimental_rerun()
+
     else:
         ss.state = 'Summary'
         local_prompt = ss.prompts.loc['summary_prompt', 'prompt']
