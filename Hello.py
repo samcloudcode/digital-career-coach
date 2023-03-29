@@ -161,7 +161,7 @@ match ss.state:
 
         display_headers()
 
-        if st.button("Let's Start!"):
+        if st.button("Let's Start!", type='primary'):
             ss.state = 'About You'
             st.experimental_rerun()
 
@@ -189,7 +189,7 @@ match ss.state:
                                                   placeholder="e.g. I've been working at AIA in this team for"
                                                               " 10 years, previously I worked at...")
 
-        if st.button("Next"):
+        if st.button("Next", type='primary'):
             # Build prompt and change state to next page
             ss.state = 'Topic Selection'
             prompt = ss.prompts.loc['intro_prompt', 'prompt']\
