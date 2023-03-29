@@ -3,6 +3,7 @@ import openai
 import time
 import toml
 import pandas as pd
+from emailing import send_email, add_html_blocks, github_markup_to_html
 
 
 def initiate_states():
@@ -40,14 +41,38 @@ def initiate_states():
 
 def load_data():
 
-    for table_name in ('pages', 'topic_prompts', 'prompts', 'functions', 'bands'):
+    for table_name in ('pages', 'topic_prompts', 'prompts', 'functions', 'bands', 'aia_info'):
 
         if table_name not in ss:
             df = pd.read_excel('data.xlsx', sheet_name=table_name, engine='openpyxl', index_col=0)
             ss[table_name] = df
 
 
+def contains_pattern(string, patterns):
+    for pattern in patterns:
+        if pattern in string:
+            return True
+    return False
+
+
+def get_aia_info(info_list):
+    topics = info_list.split('\n')
+
+    results = "For reference, this is information on the topic provided by AIA's internal guides: \n\n"
+
+    for topic in topics:
+        topic = topic.strip()
+        if not topic:
+            continue
+
+        result = ss.aia_info.loc[topic, 'info']
+        results = results + result + '\n\n'
+
+    return results
+
+
 def display_headers():
+
     if not pd.isna(ss.pages.loc[ss.state, 'title']):
         st.title(ss.pages.loc[ss.state, 'title'])
 
@@ -107,7 +132,7 @@ def update_model_response():
             ss.model_reply = "".join(response).strip()
             qu_attempts = 11
 
-        except openai.error.RateLimitError:
+        except:
             print(f"openai error, attempt {qu_attempts}")
             qu_attempts += 1
             time.sleep(1)
@@ -116,7 +141,7 @@ def update_model_response():
 
 
 # Initiate states and variables
-st.set_page_config(page_title="AIA Career Advisor", page_icon=":star2:", layout="centered",
+st.set_page_config(page_title="AIA Career Coach", page_icon=":star2:", layout="centered",
                    initial_sidebar_state="collapsed", menu_items=None)
 
 ss = st.session_state
@@ -132,8 +157,8 @@ with open('config.toml', 'r') as f:
 match ss.state:
 
     case "Intro":
+        st.image('AIA_Group_logo.png', width=100)
 
-        st.image('AIA_Group_logo.png', width=120)
         display_headers()
 
         if st.button("Let's Start!"):
@@ -181,14 +206,25 @@ match ss.state:
             st.experimental_rerun()
 
     case "Topic Selection":
+        st.image('AIA_Group_logo.png', width=100)
         display_headers()
+
+        if ss.current_topic.get('Name') is None:
+            topic_index = 0
+        else:
+            topic_index = ss.topic_prompts.index.get_loc(ss.current_topic['name'])
 
         ss.current_topic['name'] = \
             st.selectbox(label="What topic would you like to discuss?",
-                         options=ss.topic_prompts.index.tolist(), on_change=load_questions)
+                         options=ss.topic_prompts.index.tolist(), on_change=load_questions, index=topic_index)
 
         max_questions = ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']
-        aia_info = ss.topic_prompts.loc[ss.current_topic['name'], 'aia_info']
+
+        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'aia_info']):
+            aia_info = get_aia_info(ss.topic_prompts.loc[ss.current_topic['name'], 'aia_info'])
+        else:
+            aia_info = ""
+
         question_format = ss.prompts.loc['question_format', 'prompt']
 
         question_1 = ss.topic_prompts.loc[ss.current_topic['name'], 'question1']
@@ -210,19 +246,26 @@ match ss.state:
                 reply_2 = st.text_area("Reply 2", label_visibility='collapsed')
 
         if st.button("Next", type='primary'):
-            ss.state = 'Topic Questions'
-            prompt = ss.prompts.loc['coaching_prompt', 'prompt']\
-                .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
-                        position=ss.user_info["position"], experience=ss.user_info["experience"],
-                        function_detail=ss.user_info["function_detail"],
-                        topic_name=ss.current_topic['name'], aia_info=aia_info,
-                        question_1=question_1, question_2=question_2, reply_1=reply_1, reply_2=reply_2,
-                        question_guidance=ss.topic_prompts.loc[ss.current_topic['name'], 'question_guidance'],
-                        max_questions=max_questions, question_format=question_format)
-            print(prompt)
-            update_messages(prompt)
-            ss.user_reply = ""
-            st.experimental_rerun()
+            if contains_pattern(ss.current_topic['name'], ['...', '---']):
+                st.error('Please select a topic to discuss')
+
+            elif len(reply_1) > 10:
+                ss.state = 'Topic Questions'
+                prompt = ss.prompts.loc['coaching_prompt', 'prompt']\
+                    .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
+                            position=ss.user_info["position"], experience=ss.user_info["experience"],
+                            function_detail=ss.user_info["function_detail"],
+                            topic_name=ss.current_topic['name'], aia_info=aia_info,
+                            question_1=question_1, question_2=question_2, reply_1=reply_1, reply_2=reply_2,
+                            question_guidance=ss.topic_prompts.loc[ss.current_topic['name'], 'question_guidance'],
+                            max_questions=max_questions, question_format=question_format)
+                # print(prompt)
+                update_messages(prompt)
+                ss.user_reply = ""
+                st.experimental_rerun()
+            else:
+                st.error('To facilitate a more meaningful discussion, '
+                         'please include more information in your response.')
 
         if st.button("Back"):
             ss.state = 'About You'
@@ -245,11 +288,19 @@ match ss.state:
         st.button("Next", on_click=next_question, type='primary')
 
         if st.button("Back"):
-            st.text("This feature is not implemented yet")
+            st.text('Back feature is not implemented yet')
 
+            # if ss.counts == 1:
+            #     ss.state = 'Topic Selection'
+            #     st.experimental_rerun()
+            # else:
+            #     ss.counts = ss.counts - 1
+            #     ss.model_reply = ""
+            #     ss.messages.pop()
 
     case "Summary":
-        st.image('AIA_Group_logo.png', width=120)
+
+        st.image('AIA_Group_logo.png', width=100)
         display_headers()
         if ss.model_reply == "":
             model_response_display = st.empty()
@@ -259,7 +310,7 @@ match ss.state:
             response = ss.model_reply.split('::Action::')
             model_response_display = st.markdown(response[0])
 
-            print(response)
+            # print(response)
 
             for i, action in enumerate(response[1:]):
                 action_text = action.strip()
@@ -268,12 +319,26 @@ match ss.state:
         col1, col2 = st.columns(2)
 
         with col1:
+            email_address = st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
             if st.button("Send me a copy", type='primary'):
-                st.text("This feature is not implemented yet")
+                html_blocks = {
+                    '{action_plan}': github_markup_to_html(ss.model_reply),
+                    '{name}': ss.user_info["name"]
+                }
+                html_file_path = 'email_template.html'
 
-            st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
+                updated_html = add_html_blocks(html_file_path, html_blocks)
+
+                if send_email("Team mental health, action plan ideas", updated_html, email_address):
+                    st.text("Email sent! (Please note this is a demo, formatting will be improved.")
+                else:
+                    st.text("Problem with email address provided. Email not sent.")
 
         with col2:
+            ss.current_topic['name'] = \
+                st.selectbox(label="What topic would you like to discuss?",
+                             options=ss.topic_prompts.index.tolist(), label_visibility='collapsed')
+
             if st.button("Discuss another topic"):
                 ss.state = 'Topic Selection'
                 ss.counts = 1
