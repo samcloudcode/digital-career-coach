@@ -89,7 +89,7 @@ def load_questions():
 
 def next_question():
     if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
-        if len(ss.user_reply) > 10:
+        if len(ss.user_reply) > 5:
             local_prompt = ss.user_reply
             update_messages(local_prompt)
             ss.counts = ss.counts + 1
@@ -249,7 +249,7 @@ match ss.state:
             if contains_pattern(ss.current_topic['name'], ['...', '---']):
                 st.error('Please select a topic to discuss')
 
-            elif len(reply_1) > 10:
+            elif len(reply_1) > 5:
                 ss.state = 'Topic Questions'
                 prompt = ss.prompts.loc['coaching_prompt', 'prompt']\
                     .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
