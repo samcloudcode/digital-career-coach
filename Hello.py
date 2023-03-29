@@ -89,7 +89,7 @@ def load_questions():
 
 def next_question():
     if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
-        if len(ss.user_reply) > 5:
+        if len(ss.user_reply) > 3:
             local_prompt = ss.user_reply
             update_messages(local_prompt)
             ss.counts = ss.counts + 1
@@ -98,6 +98,7 @@ def next_question():
         else:
             st.error('To facilitate a more meaningful discussion, '
                      'please include more information in your response.')
+            st.experimental_rerun()
     else:
         ss.state = 'Summary'
         local_prompt = ss.prompts.loc['summary_prompt', 'prompt']
