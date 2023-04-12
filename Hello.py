@@ -171,14 +171,14 @@ match ss.state:
 
         # Collect user info
         ss.user_info["name"] = st.text_input(label="How should we address you?",
-                                             placeholder="e.g. Stacey")
+                                             placeholder="e.g. John")
 
-        ss.user_info["function"] = st.selectbox(label="Function", options=ss.functions.index.tolist())
+        ss.user_info["function"] = st.selectbox(label="Function", options=ss.functions.index.tolist(), index=4)
 
-        ss.user_info["band"] = st.selectbox(label='Title', options=ss.bands.index.tolist(), index=4)
+        ss.user_info["band"] = st.selectbox(label='Level', options=ss.bands.index.tolist(), index=4)
 
-        ss.user_info["position"] = st.text_input(label="Position",
-                                                 placeholder="e.g. Head of Culture")
+        ss.user_info["position"] = st.text_input(label="Title",
+                                                 placeholder="e.g. Finance, Procurement")
 
         function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
 
