@@ -250,7 +250,7 @@ match ss.state:
             if contains_pattern(ss.current_topic['name'], ['...', '---']):
                 st.error('Please select a topic to discuss')
 
-            elif len(reply_1) > 5:
+            elif len(reply_1) > 3:
                 ss.state = 'Topic Questions'
                 prompt = ss.prompts.loc['coaching_prompt', 'prompt']\
                     .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
@@ -288,21 +288,15 @@ match ss.state:
 
         st.button("Next", on_click=next_question, type='primary')
 
-        if st.button("Back"):
-            st.text('Back feature is not implemented yet')
-
-            # if ss.counts == 1:
-            #     ss.state = 'Topic Selection'
-            #     st.experimental_rerun()
-            # else:
-            #     ss.counts = ss.counts - 1
-            #     ss.model_reply = ""
-            #     ss.messages.pop()
 
     case "Summary":
 
         st.image('AIA_Group_logo.png', width=100)
         display_headers()
+
+        actions = []
+        response = ['Error: No actions loaded...']
+
         if ss.model_reply == "":
             model_response_display = st.empty()
             update_model_response()
@@ -315,23 +309,30 @@ match ss.state:
 
             for i, action in enumerate(response[1:]):
                 action_text = action.strip()
-                st.text_area(label=str(i), label_visibility='collapsed', value=action_text)
+                actions.append("")
+                actions[i] = st.text_area(label=str(i), label_visibility='collapsed', value=action_text)
 
         col1, col2 = st.columns(2)
 
         with col1:
             email_address = st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
             if st.button("Send me a copy", type='primary'):
+
+                action_bullets = ""
+                for action in actions:
+                    action_bullets = action_bullets + '* ' + action + '\n\n'
+
                 html_blocks = {
-                    '{action_plan}': github_markup_to_html(ss.model_reply),
-                    '{name}': ss.user_info["name"]
+                    '{summary}': github_markup_to_html(response[0]),
+                    '{actions}': github_markup_to_html(action_bullets)
                 }
+
                 html_file_path = 'email_template.html'
 
                 updated_html = add_html_blocks(html_file_path, html_blocks)
 
                 if send_email("Career Coach - Discussion Summary and Actions", updated_html, email_address):
-                    st.text("Email sent! (Please note this is a demo, formatting will be improved.")
+                    st.text("Email sent!")
                 else:
                     st.text("Problem with email address provided. Email not sent.")
 
@@ -344,5 +345,16 @@ match ss.state:
                 ss.state = 'Topic Selection'
                 ss.counts = 1
                 st.experimental_rerun()
+
+    case 'Analysis':
+        st.header("Analysis")
+
+        if ss.model_reply == "":
+            model_response_display = st.empty()
+            update_model_response()
+        else:
+            model_response_display = st.markdown(ss.model_reply)
+
+
 
 
