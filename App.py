@@ -5,70 +5,9 @@ import toml
 import pandas as pd
 from emailing import send_email, add_html_blocks, github_markup_to_html
 
-
-def initiate_states():
-
-    # Create default session states
-    if 'messages' not in ss:
-        ss['messages'] = [
-            {"role": "system", "content": ss.prompts.loc['system_message', 'prompt']},
-        ]
-
-    if 'state' not in ss:
-        ss['state'] = "Intro"
-
-    if 'model_reply' not in ss:
-        ss['model_reply'] = ""
-
-    if 'user_reply' not in ss:
-        ss['user_reply'] = ""
-
-    if 'current_topic' not in ss:
-        ss['current_topic'] = {}
-
-    if 'topics' not in ss:
-        ss['topics'] = {}
-
-    if 'counts' not in ss:
-        ss['counts'] = 1
-
-    if 'user_info' not in ss:
-        ss['user_info'] = {}
-
-    if 'load_questions' not in ss:
-        ss['load_questions'] = False
-
-
-def load_data():
-
-    for table_name in ('pages', 'topic_prompts', 'prompts', 'functions', 'bands', 'aia_info'):
-
-        if table_name not in ss:
-            df = pd.read_excel('data.xlsx', sheet_name=table_name, engine='openpyxl', index_col=0)
-            ss[table_name] = df
-
-
-def contains_pattern(string, patterns):
-    for pattern in patterns:
-        if pattern in string:
-            return True
-    return False
-
-
-def get_aia_info(info_list):
-    topics = info_list.split('\n')
-
-    results = "For reference, this is information on the topic provided by AIA's internal guides: \n\n"
-
-    for topic in topics:
-        topic = topic.strip()
-        if not topic:
-            continue
-
-        result = ss.aia_info.loc[topic, 'info']
-        results = results + result + '\n\n'
-
-    return results
+# Import the functions from the newly created files
+from helper_functions import contains_pattern, get_aia_info
+from state_handling import initiate_states, load_data, load_questions
 
 
 def display_headers():
@@ -81,10 +20,6 @@ def display_headers():
 
     if not pd.isna(ss.pages.loc[ss.state, 'markdown']):
         st.markdown(ss.pages.loc[ss.state, 'markdown'])
-
-
-def load_questions():
-    ss.load_questions = True
 
 
 def next_question():
@@ -103,6 +38,7 @@ def next_question():
         ss.state = 'Summary'
         local_prompt = ss.prompts.loc['summary_prompt', 'prompt']
         update_messages(local_prompt)
+
 
 
 def update_messages(local_prompt):
@@ -148,10 +84,6 @@ st.set_page_config(page_title="AIA Career Coach", page_icon=":star2:", layout="c
 ss = st.session_state
 load_data()
 initiate_states()
-
-
-with open('config.toml', 'r') as f:
-    config = toml.load(f)
 
 
 # Update display, dependent on state
