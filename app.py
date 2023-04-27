@@ -138,6 +138,138 @@ def create_coaching_prompt():
     return local_prompt
 
 
+def handle_intro():
+    global ss
+    st.image(LOGO_PATH, width=100)
+    # Load data into local session states
+    load_data()
+    display_headers()
+    if st.button("Let's Start!", type='primary'):
+        ss.state = 'About You'
+        st.experimental_rerun()
+
+
+def handle_about_you():
+    global index, ss
+    display_headers()
+    # Collect user info
+    user_inputs = [
+        ("How should we address you?", "text", "e.g. John", None, None, "name"),
+        ("Function", "selectbox", "", ss.functions.index.tolist(), 4, "function"),
+        ("Level", "selectbox", "", ss.bands.index.tolist(), 4, "band"),
+        ("Title", "text", "e.g. Finance, Procurement", None, None, "position"),
+        ("Can you describe your role in more detail?", "text_area", "", None, None, "function_detail"),
+        (f"Please share your work experience at {COMPANY} and elsewhere in a few lines:", "text_area",
+         f"e.g. I've been working at {COMPANY} in this team for 10 years, previously I worked at...", None, None,
+         "experience"),
+    ]
+    for label, input_type, placeholder, options, index, key in user_inputs:
+        if key == "function_detail":
+            function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
+            value = function_detail if function_detail else ''
+            ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
+        else:
+            ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
+    if st.button("Next", type='primary'):
+        # Build prompt and change state to next page
+        ss.state = 'Topic Selection'
+        prompt = ss.prompts.loc['intro_prompt', 'prompt'] \
+            .format(name=ss.user_info["name"], function=ss.user_info["function"],
+                    position=ss.user_info["position"], experience=ss.user_info["experience"],
+                    function_detail=ss.user_info["function_detail"])
+
+        ss.messages.append({"role": "user", "content": prompt})
+        ss.model_reply = ""
+        st.experimental_rerun()
+    if st.button("Back"):
+        change_state('Intro')
+
+
+def handle_topic_selection():
+    global ss
+    st.image(LOGO_PATH, width=100)
+    display_headers()
+    get_topic_info()
+    if st.button("Next", type='primary'):
+        if contains_pattern(ss.current_topic['name'], ['...', '---']):
+            st.error('Please select a topic to discuss')
+
+        elif len(ss.current_topic['reply_1']) > 3:
+            ss.state = 'Topic Questions'
+            prompt = create_coaching_prompt()
+            update_messages(prompt)
+            ss.user_reply = ""
+            st.experimental_rerun()
+        else:
+            st.error('To facilitate a more meaningful discussion, '
+                     'please include more information in your response.')
+    if st.button("Back"):
+        change_state('About You')
+
+
+def handle_topic_questions():
+    global model_response_display, ss
+    display_headers()
+    if ss.model_reply == "":
+        model_response_display = st.empty()
+        update_model_response()
+    else:
+        model_response_display = st.markdown(ss.model_reply)
+    if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
+        ss.user_reply = st.text_area("Response:", label_visibility='collapsed',
+                                     placeholder="Take your time to think about your reply.",
+                                     key='reply')
+    st.button("Next", on_click=next_coaching_question, type='primary')
+
+
+def handle_summary():
+    global model_response_display, ss
+    st.image(LOGO_PATH, width=100)
+    display_headers()
+    actions = []
+    response = ['Error: No actions loaded...']
+    if ss.model_reply == "":
+        model_response_display = st.empty()
+        update_model_response()
+        st.experimental_rerun()
+    else:
+        response = ss.model_reply.split('::Action::')
+        model_response_display = st.markdown(response[0])
+
+        for i, action in enumerate(response[1:]):
+            action_text = action.strip()
+            actions.append("")
+            actions[i] = st.text_area(label=str(i), label_visibility='collapsed', value=action_text)
+    col1, col2 = st.columns(2)
+    with col1:
+        email_address = st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
+        if st.button("Send me a copy", type='primary'):
+
+            action_bullets = get_action_bullets(actions)
+
+            html_blocks = {
+                '{summary}': github_markup_to_html(response[0]),
+                '{actions}': github_markup_to_html(action_bullets)
+            }
+
+            html_file_path = 'email_template.html'
+
+            updated_html = add_html_blocks(html_file_path, html_blocks)
+
+            if send_email("Career Coach - Discussion Summary and Actions", updated_html, email_address):
+                st.text("Email sent!")
+            else:
+                st.text("Problem with email address provided. Email not sent.")
+    with col2:
+        ss.current_topic['name'] = \
+            st.selectbox(label="What topic would you like to discuss?",
+                         options=ss.topic_prompts.index.tolist(), label_visibility='collapsed')
+
+        if st.button("Discuss another topic"):
+            ss.counts = 1
+            change_state('Topic Selection')
+
+
 LOGO_PATH = 'AIA_Group_logo.png'
 COMPANY = 'AIA'
 
@@ -150,150 +282,16 @@ ss = st.session_state
 # Initiate streamlit states
 initiate_states()
 
+state_functions = {
+    "Intro": handle_intro,
+    "About You": handle_about_you,
+    "Topic Selection": handle_topic_selection,
+    "Topic Questions": handle_topic_questions,
+    "Summary": handle_summary,
+}
 
-# Update view, dependent on state variable
-match ss.state:
+state_functions[ss.state]()
 
-    case "Intro":
-        st.image(LOGO_PATH, width=100)
-
-        # Load data into local session states
-        load_data()
-        display_headers()
-
-        if st.button("Let's Start!", type='primary'):
-            ss.state = 'About You'
-            st.experimental_rerun()
-
-    case "About You":
-        display_headers()
-
-        # Collect user info
-        user_inputs = [
-            ("How should we address you?", "text", "e.g. John", None, None, "name"),
-            ("Function", "selectbox", "", ss.functions.index.tolist(), 4, "function"),
-            ("Level", "selectbox", "", ss.bands.index.tolist(), 4, "band"),
-            ("Title", "text", "e.g. Finance, Procurement", None, None, "position"),
-            ("Can you describe your role in more detail?", "text_area", "", None, None, "function_detail"),
-            (f"Please share your work experience at {COMPANY} and elsewhere in a few lines:", "text_area",
-             f"e.g. I've been working at {COMPANY} in this team for 10 years, previously I worked at...", None, None,
-             "experience"),
-        ]
-
-        for label, input_type, placeholder, options, index, key in user_inputs:
-            if key == "function_detail":
-                function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
-                value = function_detail if function_detail else ''
-                ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
-            else:
-                ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
-
-        if st.button("Next", type='primary'):
-            # Build prompt and change state to next page
-            ss.state = 'Topic Selection'
-            prompt = ss.prompts.loc['intro_prompt', 'prompt']\
-                .format(name=ss.user_info["name"], function=ss.user_info["function"],
-                        position=ss.user_info["position"], experience=ss.user_info["experience"],
-                        function_detail=ss.user_info["function_detail"])
-
-            ss.messages.append({"role": "user", "content": prompt})
-            ss.model_reply = ""
-            st.experimental_rerun()
-
-        if st.button("Back"):
-            change_state('Intro')
-
-    case "Topic Selection":
-        st.image(LOGO_PATH, width=100)
-        display_headers()
-
-        get_topic_info()
-
-        if st.button("Next", type='primary'):
-            if contains_pattern(ss.current_topic['name'], ['...', '---']):
-                st.error('Please select a topic to discuss')
-
-            elif len(ss.current_topic['reply_1']) > 3:
-                ss.state = 'Topic Questions'
-                prompt = create_coaching_prompt()
-                update_messages(prompt)
-                ss.user_reply = ""
-                st.experimental_rerun()
-            else:
-                st.error('To facilitate a more meaningful discussion, '
-                         'please include more information in your response.')
-
-        if st.button("Back"):
-            change_state('About You')
-
-    case "Topic Questions":
-        display_headers()
-
-        if ss.model_reply == "":
-            model_response_display = st.empty()
-            update_model_response()
-        else:
-            model_response_display = st.markdown(ss.model_reply)
-
-        if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
-            ss.user_reply = st.text_area("Response:", label_visibility='collapsed',
-                                         placeholder="Take your time to think about your reply.",
-                                         key='reply')
-
-        st.button("Next", on_click=next_coaching_question, type='primary')
-
-    case "Summary":
-
-        st.image(LOGO_PATH, width=100)
-        display_headers()
-
-        actions = []
-        response = ['Error: No actions loaded...']
-
-        if ss.model_reply == "":
-            model_response_display = st.empty()
-            update_model_response()
-            st.experimental_rerun()
-        else:
-            response = ss.model_reply.split('::Action::')
-            model_response_display = st.markdown(response[0])
-
-            for i, action in enumerate(response[1:]):
-                action_text = action.strip()
-                actions.append("")
-                actions[i] = st.text_area(label=str(i), label_visibility='collapsed', value=action_text)
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            email_address = st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
-            if st.button("Send me a copy", type='primary'):
-
-                action_bullets = get_action_bullets(actions)
-
-
-                html_blocks = {
-                    '{summary}': github_markup_to_html(response[0]),
-                    '{actions}': github_markup_to_html(action_bullets)
-                }
-
-                html_file_path = 'email_template.html'
-
-                updated_html = add_html_blocks(html_file_path, html_blocks)
-
-                if send_email("Career Coach - Discussion Summary and Actions", updated_html, email_address):
-                    st.text("Email sent!")
-                else:
-                    st.text("Problem with email address provided. Email not sent.")
-
-        with col2:
-            ss.current_topic['name'] = \
-                st.selectbox(label="What topic would you like to discuss?",
-                             options=ss.topic_prompts.index.tolist(), label_visibility='collapsed')
-
-            if st.button("Discuss another topic"):
-                ss.counts = 1
-                change_state('Topic Selection')
 
 
 
