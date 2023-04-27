@@ -290,8 +290,8 @@ def handle_summary():
             change_state('Topic Selection')
 
 
-LOGO_PATH = 'AIA_Group_logo.png'
-COMPANY = 'AIA'
+LOGO_PATH = 'placeholder.png'
+COMPANY = 'Company'
 
 # Initiate states and variables
 st.set_page_config(page_title=f"{COMPANY} Career Coach", page_icon=":star2:", layout="centered",
