@@ -1,13 +1,17 @@
 import streamlit as st
 import openai
 import time
-import toml
 import pandas as pd
 from emailing import send_email, add_html_blocks, github_markup_to_html
 
-# Import the functions from the newly created files
-from helper_functions import contains_pattern, get_aia_info
+# Import functions
+from helper_functions import contains_pattern, get_company_info, get_action_bullets
 from state_handling import initiate_states, load_data, load_questions
+
+
+def change_state(new_state):
+    ss.state = new_state
+    st.experimental_rerun()
 
 
 def display_headers():
@@ -22,7 +26,8 @@ def display_headers():
         st.markdown(ss.pages.loc[ss.state, 'markdown'])
 
 
-def next_question():
+def next_coaching_question():
+    """Updates the prompt messages and moves to next page"""
     if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
         if len(ss.user_reply) > 3:
             local_prompt = ss.user_reply
@@ -40,8 +45,8 @@ def next_question():
         update_messages(local_prompt)
 
 
-
 def update_messages(local_prompt):
+    """Updates the prompt messages"""
     ss.messages.append({"role": "assistant", "content": ss.model_reply})
     ss.messages.append({"role": "user", "content": local_prompt})
     ss.model_reply = ""
@@ -77,21 +82,83 @@ def update_model_response():
     st.experimental_rerun()
 
 
+def collect_user_info(label: str, input_type: str, placeholder: str = '', options: list = None, index: int = None):
+    if input_type == "text":
+        return st.text_input(label=label, placeholder=placeholder)
+    elif input_type == "selectbox":
+        return st.selectbox(label=label, options=options, index=index)
+    elif input_type == "text_area":
+        return st.text_area(label=label, placeholder=placeholder)
+    else:
+        raise ValueError("Invalid input_type")
+
+
+def get_topic_info():
+    if ss.current_topic.get('Name') is None:
+        topic_index = 0
+    else:
+        topic_index = ss.topic_prompts.index.get_loc(ss.current_topic['name'])
+    ss.current_topic['name'] = \
+        st.selectbox(label="What topic would you like to discuss?",
+                     options=ss.topic_prompts.index.tolist(), on_change=load_questions, index=topic_index)
+    ss.current_topic['max_questions'] = ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']
+    if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'company_info']):
+        ss.current_topic['company_info'] = get_company_info(ss.topic_prompts.loc[ss.current_topic['name'], 'company_info'])
+    else:
+        ss.current_topic['company_info'] = ""
+    ss.current_topic['question_format'] = ss.prompts.loc['question_format', 'prompt']
+    ss.current_topic['question_1'] = ss.topic_prompts.loc[ss.current_topic['name'], 'question1']
+    ss.current_topic['question_2'] = ss.topic_prompts.loc[ss.current_topic['name'], 'question2']
+    ss.current_topic['reply_1'] = ""
+    ss.current_topic['reply_2'] = ""
+
+    if ss.load_questions:
+        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'description']):
+            st.markdown('**' + ss.topic_prompts.loc[ss.current_topic['name'], 'description'] + '**')
+
+        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question1']):
+            st.markdown(ss.current_topic['question_1'])
+            ss.current_topic['reply_1'] = st.text_area("Reply 1", label_visibility='collapsed')
+
+        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question2']):
+            st.markdown(ss.current_topic['question_2'])
+            ss.current_topic['reply_1=2'] = st.text_area("Reply 2", label_visibility='collapsed')
+
+
+def create_coaching_prompt():
+    local_prompt = ss.prompts.loc['coaching_prompt', 'prompt'] \
+        .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
+                position=ss.user_info["position"], experience=ss.user_info["experience"],
+                function_detail=ss.user_info["function_detail"],
+                topic_name=ss.current_topic['name'], company_info=ss.current_topic['company_info'],
+                question_1=ss.current_topic['question_1'], question_2=ss.current_topic['question_2'],
+                reply_1=ss.current_topic['reply_1'], reply_2=ss.current_topic['reply_2'],
+                question_guidance=ss.topic_prompts.loc[ss.current_topic['name'], 'question_guidance'],
+                max_questions=ss.current_topic['max_questions'], question_format=ss.current_topic['question_format'])
+    return local_prompt
+
+
+LOGO_PATH = 'AIA_Group_logo.png'
+COMPANY = 'AIA'
+
 # Initiate states and variables
-st.set_page_config(page_title="AIA Career Coach", page_icon=":star2:", layout="centered",
+st.set_page_config(page_title=f"{COMPANY} Career Coach", page_icon=":star2:", layout="centered",
                    initial_sidebar_state="collapsed", menu_items=None)
 
 ss = st.session_state
-load_data()
+
+# Initiate streamlit states
 initiate_states()
 
 
-# Update display, dependent on state
+# Update view, dependent on state variable
 match ss.state:
 
     case "Intro":
-        st.image('AIA_Group_logo.png', width=100)
+        st.image(LOGO_PATH, width=100)
 
+        # Load data into local session states
+        load_data()
         display_headers()
 
         if st.button("Let's Start!", type='primary'):
@@ -102,25 +169,24 @@ match ss.state:
         display_headers()
 
         # Collect user info
-        ss.user_info["name"] = st.text_input(label="How should we address you?",
-                                             placeholder="e.g. John")
+        user_inputs = [
+            ("How should we address you?", "text", "e.g. John", None, None, "name"),
+            ("Function", "selectbox", "", ss.functions.index.tolist(), 4, "function"),
+            ("Level", "selectbox", "", ss.bands.index.tolist(), 4, "band"),
+            ("Title", "text", "e.g. Finance, Procurement", None, None, "position"),
+            ("Can you describe your role in more detail?", "text_area", "", None, None, "function_detail"),
+            (f"Please share your work experience at {COMPANY} and elsewhere in a few lines:", "text_area",
+             f"e.g. I've been working at {COMPANY} in this team for 10 years, previously I worked at...", None, None,
+             "experience"),
+        ]
 
-        ss.user_info["function"] = st.selectbox(label="Function", options=ss.functions.index.tolist(), index=4)
-
-        ss.user_info["band"] = st.selectbox(label='Level', options=ss.bands.index.tolist(), index=4)
-
-        ss.user_info["position"] = st.text_input(label="Title",
-                                                 placeholder="e.g. Finance, Procurement")
-
-        function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
-
-        ss.user_info["function_detail"] = st.text_area(label="Can you describe your role in more detail?",
-                                                       value=function_detail)
-
-        ss.user_info["experience"] = st.text_area(label="Please share your work experience at AIA "
-                                                         "and elsewhere in a few lines:",
-                                                  placeholder="e.g. I've been working at AIA in this team for"
-                                                              " 10 years, previously I worked at...")
+        for label, input_type, placeholder, options, index, key in user_inputs:
+            if key == "function_detail":
+                function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
+                value = function_detail if function_detail else ''
+                ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
+            else:
+                ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
 
         if st.button("Next", type='primary'):
             # Build prompt and change state to next page
@@ -130,69 +196,26 @@ match ss.state:
                         position=ss.user_info["position"], experience=ss.user_info["experience"],
                         function_detail=ss.user_info["function_detail"])
 
-            ss.messages.append({"role": "user", "content": prompt}),
+            ss.messages.append({"role": "user", "content": prompt})
             ss.model_reply = ""
             st.experimental_rerun()
 
         if st.button("Back"):
-            ss.state = 'Intro'
-            st.experimental_rerun()
+            change_state('Intro')
 
     case "Topic Selection":
-        st.image('AIA_Group_logo.png', width=100)
+        st.image(LOGO_PATH, width=100)
         display_headers()
 
-        if ss.current_topic.get('Name') is None:
-            topic_index = 0
-        else:
-            topic_index = ss.topic_prompts.index.get_loc(ss.current_topic['name'])
-
-        ss.current_topic['name'] = \
-            st.selectbox(label="What topic would you like to discuss?",
-                         options=ss.topic_prompts.index.tolist(), on_change=load_questions, index=topic_index)
-
-        max_questions = ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']
-
-        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'aia_info']):
-            aia_info = get_aia_info(ss.topic_prompts.loc[ss.current_topic['name'], 'aia_info'])
-        else:
-            aia_info = ""
-
-        question_format = ss.prompts.loc['question_format', 'prompt']
-
-        question_1 = ss.topic_prompts.loc[ss.current_topic['name'], 'question1']
-        question_2 = ss.topic_prompts.loc[ss.current_topic['name'], 'question2']
-
-        reply_1 = ""
-        reply_2 = ""
-
-        if ss.load_questions:
-            if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'description']):
-                st.markdown('**' + ss.topic_prompts.loc[ss.current_topic['name'], 'description'] + '**')
-
-            if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question1']):
-                st.markdown(question_1)
-                reply_1 = st.text_area("Reply 1", label_visibility='collapsed')
-
-            if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question2']):
-                st.markdown(question_2)
-                reply_2 = st.text_area("Reply 2", label_visibility='collapsed')
+        get_topic_info()
 
         if st.button("Next", type='primary'):
             if contains_pattern(ss.current_topic['name'], ['...', '---']):
                 st.error('Please select a topic to discuss')
 
-            elif len(reply_1) > 3:
+            elif len(ss.current_topic['reply_1']) > 3:
                 ss.state = 'Topic Questions'
-                prompt = ss.prompts.loc['coaching_prompt', 'prompt']\
-                    .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
-                            position=ss.user_info["position"], experience=ss.user_info["experience"],
-                            function_detail=ss.user_info["function_detail"],
-                            topic_name=ss.current_topic['name'], aia_info=aia_info,
-                            question_1=question_1, question_2=question_2, reply_1=reply_1, reply_2=reply_2,
-                            question_guidance=ss.topic_prompts.loc[ss.current_topic['name'], 'question_guidance'],
-                            max_questions=max_questions, question_format=question_format)
-                # print(prompt)
+                prompt = create_coaching_prompt()
                 update_messages(prompt)
                 ss.user_reply = ""
                 st.experimental_rerun()
@@ -201,8 +224,7 @@ match ss.state:
                          'please include more information in your response.')
 
         if st.button("Back"):
-            ss.state = 'About You'
-            st.experimental_rerun()
+            change_state('About You')
 
     case "Topic Questions":
         display_headers()
@@ -218,12 +240,11 @@ match ss.state:
                                          placeholder="Take your time to think about your reply.",
                                          key='reply')
 
-        st.button("Next", on_click=next_question, type='primary')
-
+        st.button("Next", on_click=next_coaching_question, type='primary')
 
     case "Summary":
 
-        st.image('AIA_Group_logo.png', width=100)
+        st.image(LOGO_PATH, width=100)
         display_headers()
 
         actions = []
@@ -237,8 +258,6 @@ match ss.state:
             response = ss.model_reply.split('::Action::')
             model_response_display = st.markdown(response[0])
 
-            # print(response)
-
             for i, action in enumerate(response[1:]):
                 action_text = action.strip()
                 actions.append("")
@@ -250,9 +269,8 @@ match ss.state:
             email_address = st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
             if st.button("Send me a copy", type='primary'):
 
-                action_bullets = ""
-                for action in actions:
-                    action_bullets = action_bullets + '* ' + action + '\n\n'
+                action_bullets = get_action_bullets(actions)
+
 
                 html_blocks = {
                     '{summary}': github_markup_to_html(response[0]),
@@ -274,18 +292,9 @@ match ss.state:
                              options=ss.topic_prompts.index.tolist(), label_visibility='collapsed')
 
             if st.button("Discuss another topic"):
-                ss.state = 'Topic Selection'
                 ss.counts = 1
-                st.experimental_rerun()
+                change_state('Topic Selection')
 
-    case 'Analysis':
-        st.header("Analysis")
-
-        if ss.model_reply == "":
-            model_response_display = st.empty()
-            update_model_response()
-        else:
-            model_response_display = st.markdown(ss.model_reply)
 
 
 

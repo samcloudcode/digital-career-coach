@@ -5,9 +5,7 @@ def initiate_states():
 
     # Create default session states
     if 'messages' not in ss:
-        ss['messages'] = [
-            {"role": "system", "content": ss.prompts.loc['system_message', 'prompt']},
-        ]
+        ss['messages'] = []
 
     if 'state' not in ss:
         ss['state'] = "Intro"
@@ -36,7 +34,7 @@ def initiate_states():
 
 def load_data():
 
-    for table_name in ('pages', 'topic_prompts', 'prompts', 'functions', 'bands', 'aia_info'):
+    for table_name in ('pages', 'topic_prompts', 'prompts', 'functions', 'bands', 'company_info'):
 
         if table_name not in ss:
             df = pd.read_excel('data.xlsx', sheet_name=table_name, engine='openpyxl', index_col=0)
