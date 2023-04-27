@@ -26,6 +26,10 @@ def display_headers():
         st.markdown(ss.pages.loc[ss.state, 'markdown'])
 
 
+def render_logo():
+    st.image(LOGO_PATH, width=100)
+
+
 def next_coaching_question():
     """Updates the prompt messages and moves to next page"""
     if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
@@ -139,8 +143,11 @@ def create_coaching_prompt():
 
 
 def handle_intro():
+    """
+        Handles the 'Intro' section where welcome message is displayed.
+    """
     global ss
-    st.image(LOGO_PATH, width=100)
+    render_logo()
     # Load data into local session states
     load_data()
     display_headers()
@@ -150,6 +157,10 @@ def handle_intro():
 
 
 def handle_about_you():
+    """
+    Handles the 'About You' section where user inputs their personal information.
+    """
+
     global index, ss
     display_headers()
     # Collect user info
@@ -186,8 +197,11 @@ def handle_about_you():
 
 
 def handle_topic_selection():
+    """
+        Handles the 'Topic Selection' section where user selects a topic for discussion.
+    """
     global ss
-    st.image(LOGO_PATH, width=100)
+    render_logo()
     display_headers()
     get_topic_info()
     if st.button("Next", type='primary'):
@@ -208,6 +222,9 @@ def handle_topic_selection():
 
 
 def handle_topic_questions():
+    """
+        Handles the 'Chat-like' section where user is asked a series of questions generated via prompt.
+    """
     global model_response_display, ss
     display_headers()
     if ss.model_reply == "":
@@ -223,8 +240,11 @@ def handle_topic_questions():
 
 
 def handle_summary():
+    """
+        Handles the 'Summary' section where user is shown a structured summary of the conversation.
+    """
     global model_response_display, ss
-    st.image(LOGO_PATH, width=100)
+    render_logo()
     display_headers()
     actions = []
     response = ['Error: No actions loaded...']
