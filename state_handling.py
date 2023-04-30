@@ -1,50 +1,37 @@
 import streamlit as st
 import pandas as pd
 
+
 def initiate_states():
 
     # Create default session states
-    if 'messages' not in ss:
-        ss['messages'] = []
 
     if 'state' not in ss:
-        ss['state'] = "Intro"
-
-    if 'model_reply' not in ss:
-        ss['model_reply'] = ""
-
-    if 'user_reply' not in ss:
-        ss['user_reply'] = ""
+        ss['state'] = "intro"
 
     if 'current_topic' not in ss:
         ss['current_topic'] = {}
 
-    if 'topics' not in ss:
-        ss['topics'] = {}
-
     if 'counts' not in ss:
         ss['counts'] = 1
-
-    if 'user_info' not in ss:
-        ss['user_info'] = {}
-
-    if 'load_questions' not in ss:
-        ss['load_questions'] = False
 
 
 def load_data():
 
-    for table_name in ('pages', 'topic_prompts', 'prompts', 'functions', 'bands', 'company_info'):
+    # Load the Excel file
+    excel_file = pd.ExcelFile('data.xlsx', engine='openpyxl')
 
+    # Get the list of sheet names
+    sheet_names = excel_file.sheet_names
+
+    for table_name in sheet_names:
         if table_name not in ss:
-            df = pd.read_excel('data.xlsx', sheet_name=table_name, engine='openpyxl', index_col=0)
+            df = pd.read_excel(excel_file, sheet_name=table_name, index_col=0)
             ss[table_name] = df
 
 
 def load_questions():
     ss.load_questions = True
-
-
 
 
 ss = st.session_state

@@ -2,11 +2,10 @@ import streamlit as st
 import openai
 import time
 import pandas as pd
-from emailing import send_email, add_html_blocks, github_markup_to_html
+import os
 
 # Import functions
-from helper_functions import contains_pattern, get_company_info, get_action_bullets
-from state_handling import initiate_states, load_data, load_questions
+from state_handling import initiate_states, load_data
 
 
 def change_state(new_state):
@@ -27,119 +26,116 @@ def display_headers():
 
 
 def render_logo():
-    st.image(LOGO_PATH, width=100)
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, width=100)
 
 
 def next_coaching_question():
     """Updates the prompt messages and moves to next page"""
-    if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
-        if len(ss.user_reply) > 3:
-            local_prompt = ss.user_reply
-            update_messages(local_prompt)
-            ss.counts = ss.counts + 1
-            ss.user_reply = ""
-            st.session_state["reply"] = ""
-        else:
-            st.error('To facilitate a more meaningful discussion, '
-                     'please include more information in your response.')
-
+    if len(ss.chat_coach.user_reply) > 3:
+        ss.chat_coach.add_user_reply()
+        ss.counts = ss.counts + 1
+        st.session_state["reply"] = ""
     else:
-        ss.state = 'Summary'
-        local_prompt = ss.prompts.loc['summary_prompt', 'prompt']
-        update_messages(local_prompt)
+        st.error('To facilitate a more meaningful discussion, '
+                 'please include more information in your response.')
 
 
-def update_messages(local_prompt):
-    """Updates the prompt messages"""
-    ss.messages.append({"role": "assistant", "content": ss.model_reply})
-    ss.messages.append({"role": "user", "content": local_prompt})
-    ss.model_reply = ""
-    ss.user_reply = ""
+def back_to_summary():
+    ss.state = 'intro'
+    summary_prompt = ss.prompts.loc['summary_prompt', 'prompt']\
+        .format(topic=ss.user_session.active_topic,
+                max_questions=ss.topics.loc[ss.user_session.active_topic, 'max_questions'])
+
+    ss.chat_coach.add_prompt(summary_prompt)
+    ss.user_session.active_topic_answered(True)
+    ss.counts = 1
 
 
-def update_model_response():
-    """Calls the OpenAI API and updates model_response_display"""
-    openai.api_key = st.secrets['SECRET_KEY']
+class UserSession:
+    def __init__(self, topics, summaries):
+        self.topics = {}
+        self.summaries = {}
+        self.active_topic = ""
+        self.active_summary = ""
+        self.total_messages = 1
 
-    qu_attempts = 1
-    while qu_attempts <= 10:
+        for topic in topics:
+            self.topics[topic] = {'answered': False, 'summary': ""}
 
-        try:
-            response = []
-            for resp in openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=ss.messages,
-                    stream=True):
-                if 'content' in resp['choices'][0]['delta']:
-                    response.append(resp['choices'][0]['delta']['content'])
-                    result = "".join(response).strip()
-                    model_response_display.markdown(f'{result}')
+        for summary in summaries:
+            self.summaries[summary] = {'summary': "", 'options': ""}
 
-            ss.model_reply = "".join(response).strip()
-            qu_attempts = 11
+        self.change_to_active_topic()
 
-        except:
-            print(f"openai error, attempt {qu_attempts}")
-            qu_attempts += 1
-            time.sleep(1)
+    def change_to_active_topic(self):
+        for topic, topic_data in self.topics.items():
+            if not topic_data['answered']:
+                self.active_topic = topic
+                break
 
-    st.experimental_rerun()
+    def all_topics_answered(self):
+        response = True
+        for topic, topic_data in self.topics.items():
+            if not topic_data['answered']:
+                response = False
+                break
+        return response
 
+    def active_topic_answered(self, answered):
+        self.topics[self.active_topic]['answered'] = answered
 
-def collect_user_info(label: str, input_type: str, placeholder: str = '', options: list = None, index: int = None):
-    if input_type == "text":
-        return st.text_input(label=label, placeholder=placeholder)
-    elif input_type == "selectbox":
-        return st.selectbox(label=label, options=options, index=index)
-    elif input_type == "text_area":
-        return st.text_area(label=label, placeholder=placeholder)
-    else:
-        raise ValueError("Invalid input_type")
+    def active_summary_answered(self, answered):
+        self.summaries[self.active_summary]['answered'] = answered
 
 
-def get_topic_info():
-    if ss.current_topic.get('Name') is None:
-        topic_index = 0
-    else:
-        topic_index = ss.topic_prompts.index.get_loc(ss.current_topic['name'])
-    ss.current_topic['name'] = \
-        st.selectbox(label="What topic would you like to discuss?",
-                     options=ss.topic_prompts.index.tolist(), on_change=load_questions, index=topic_index)
-    ss.current_topic['max_questions'] = ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']
-    if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'company_info']):
-        ss.current_topic['company_info'] = get_company_info(ss.topic_prompts.loc[ss.current_topic['name'], 'company_info'])
-    else:
-        ss.current_topic['company_info'] = ""
-    ss.current_topic['question_format'] = ss.prompts.loc['question_format', 'prompt']
-    ss.current_topic['question_1'] = ss.topic_prompts.loc[ss.current_topic['name'], 'question1']
-    ss.current_topic['question_2'] = ss.topic_prompts.loc[ss.current_topic['name'], 'question2']
-    ss.current_topic['reply_1'] = ""
-    ss.current_topic['reply_2'] = ""
+class ChatAssistant:
+    def __init__(self, secret_key, system_message):
+        self.messages = []
+        self.model_reply = ""
+        self.user_reply = ""
+        self.secret_key = secret_key
+        self.system_message = system_message
+        self.messages.append({"role": "system", "content": self.system_message})
 
-    if ss.load_questions:
-        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'description']):
-            st.markdown('**' + ss.topic_prompts.loc[ss.current_topic['name'], 'description'] + '**')
+    def add_prompt(self, chat_prompt):
+        """Updates the prompt messages"""
+        self.messages.append({"role": "user", "content": chat_prompt})
+        self.model_reply = ""
 
-        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question1']):
-            st.markdown(ss.current_topic['question_1'])
-            ss.current_topic['reply_1'] = st.text_area("Reply 1", label_visibility='collapsed')
+    def add_user_reply(self):
+        """Updates the prompt messages"""
+        self.messages.append({"role": "user", "content": self.user_reply})
+        self.user_reply = ""
+        self.model_reply = ""
 
-        if not pd.isna(ss.topic_prompts.loc[ss.current_topic['name'], 'question2']):
-            st.markdown(ss.current_topic['question_2'])
-            ss.current_topic['reply_1=2'] = st.text_area("Reply 2", label_visibility='collapsed')
+    def update_response(self, response_display_object):
+        """Calls the OpenAI API and updates model_response_display"""
+        openai.api_key = self.secret_key
+        qu_attempts = 1
+        while qu_attempts <= 10:
 
+            try:
+                response = []
+                for resp in openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=self.messages,
+                        stream=True):
+                    if 'content' in resp['choices'][0]['delta']:
+                        response.append(resp['choices'][0]['delta']['content'])
+                        result = "".join(response).strip()
+                        response_display_object.markdown(f'{result}')
 
-def create_coaching_prompt():
-    local_prompt = ss.prompts.loc['coaching_prompt', 'prompt'] \
-        .format(user_name=ss.user_info["name"], band=ss.user_info["band"], function=ss.user_info["function"],
-                position=ss.user_info["position"], experience=ss.user_info["experience"],
-                function_detail=ss.user_info["function_detail"],
-                topic_name=ss.current_topic['name'], company_info=ss.current_topic['company_info'],
-                question_1=ss.current_topic['question_1'], question_2=ss.current_topic['question_2'],
-                reply_1=ss.current_topic['reply_1'], reply_2=ss.current_topic['reply_2'],
-                question_guidance=ss.topic_prompts.loc[ss.current_topic['name'], 'question_guidance'],
-                max_questions=ss.current_topic['max_questions'], question_format=ss.current_topic['question_format'])
-    return local_prompt
+                self.model_reply = "".join(response).strip()
+
+                qu_attempts = 11
+
+            except:
+                print(f"openai error, attempt {qu_attempts}")
+                qu_attempts += 1
+                time.sleep(1)
+
+        self.messages.append({"role": "assistant", "content": self.model_reply})
 
 
 def handle_intro():
@@ -151,74 +147,65 @@ def handle_intro():
     # Load data into local session states
     load_data()
     display_headers()
-    if st.button("Let's Start!", type='primary'):
-        ss.state = 'About You'
-        st.experimental_rerun()
+
+    system_message = ""
+
+    if 'chat_coach' not in ss:
+        ss['chat_coach'] = ChatAssistant(secret_key=st.secrets['SECRET_KEY'], system_message=system_message)
+        ss['user_session'] = UserSession(ss.topics.index.tolist(), ss.summaries.index.tolist())
 
 
-def handle_about_you():
-    """
-    Handles the 'About You' section where user inputs their personal information.
-    """
+    # Create expanders topics
+    for topic, row in ss.topics.iterrows():
+        handle_topic_expander(row, ss, topic)
 
-    global index, ss
-    display_headers()
-    # Collect user info
-    user_inputs = [
-        ("How should we address you?", "text", "e.g. John", None, None, "name"),
-        ("Function", "selectbox", "", ss.functions.index.tolist(), 4, "function"),
-        ("Level", "selectbox", "", ss.bands.index.tolist(), 4, "band"),
-        ("Title", "text", "e.g. Finance, Procurement", None, None, "position"),
-        ("Can you describe your role in more detail?", "text_area", "", None, None, "function_detail"),
-        (f"Please share your work experience at {COMPANY} and elsewhere in a few lines:", "text_area",
-         f"e.g. I've been working at {COMPANY} in this team for 10 years, previously I worked at...", None, None,
-         "experience"),
-    ]
-    for label, input_type, placeholder, options, index, key in user_inputs:
-        if key == "function_detail":
-            function_detail = ss.functions.loc[ss.user_info["function"], 'function_detail']
-            value = function_detail if function_detail else ''
-            ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
+    summary_option_name = st.selectbox("Let's work on your:", options=ss.summaries['name'].tolist())
+    summary_option = ss.summaries.loc[ss.summaries['name'] == summary_option_name].index[0]
+
+    complete = ss.user_session.all_topics_answered()
+    button_type = 'primary' if complete else 'secondary'
+
+    if st.button('Go', type=button_type):
+        if complete:
+            ss.user_session.active_summary = summary_option
+            ss.chat_coach.add_prompt(ss.summaries.loc[summary_option, 'prompt'])
+            change_state('summary')
         else:
-            ss.user_info[key] = collect_user_info(label, input_type, placeholder, options, index)
-    if st.button("Next", type='primary'):
-        # Build prompt and change state to next page
-        ss.state = 'Topic Selection'
-        prompt = ss.prompts.loc['intro_prompt', 'prompt'] \
-            .format(name=ss.user_info["name"], function=ss.user_info["function"],
-                    position=ss.user_info["position"], experience=ss.user_info["experience"],
-                    function_detail=ss.user_info["function_detail"])
-
-        ss.messages.append({"role": "user", "content": prompt})
-        ss.model_reply = ""
-        st.experimental_rerun()
-    if st.button("Back"):
-        change_state('Intro')
+            st.error('Please answer all sections first')
 
 
-def handle_topic_selection():
-    """
-        Handles the 'Topic Selection' section where user selects a topic for discussion.
-    """
-    global ss
-    render_logo()
-    display_headers()
-    get_topic_info()
-    if st.button("Next", type='primary'):
-        if contains_pattern(ss.current_topic['name'], ['...', '---']):
-            st.error('Please select a topic to discuss')
+def handle_topic_expander(row, ss, topic):
+    expander = st.expander(f"**{row['title']}**", expanded=(ss.user_session.active_topic == topic))
+    with expander:
+        st.markdown(row['intro'])
 
-        elif len(ss.current_topic['reply_1']) > 3:
-            ss.state = 'Topic Questions'
-            prompt = create_coaching_prompt()
-            update_messages(prompt)
-            ss.user_reply = ""
-            st.experimental_rerun()
+        if ss.user_session.topics[topic]['answered']:
+            if ss.user_session.topics[topic]['summary'] == "":
+                local_model_response_display = st.empty()
+                ss.chat_coach.update_response(local_model_response_display)
+                ss.user_session.topics[topic]['summary'] = ss.chat_coach.model_reply
+            else:
+                st.markdown(ss.user_session.topics[topic]['summary'])
+
+            if st.button("Start again", key=f"Refresh {topic}"):
+                topic_prompt = ss.prompts.at['interview_prompt', 'prompt'] \
+                    .format(topic=topic, guidance_questions=row['guidance_questions'],
+                            max_questions=row['max_questions'])
+                ss.user_session.active_topic = topic
+                ss.chat_coach.add_prompt(topic_prompt)
+                change_state('questions')
+
+            if st.button("Next", key=f"Next {topic}", type='primary'):
+                ss.user_session.change_to_active_topic()
+                st.experimental_rerun()
+
         else:
-            st.error('To facilitate a more meaningful discussion, '
-                     'please include more information in your response.')
-    if st.button("Back"):
-        change_state('About You')
+            if st.button("Start", key=f"Start {topic}", type='primary'):
+                topic_prompt = ss.prompts.at['interview_prompt', 'prompt'] \
+                    .format(topic=topic, guidance_questions=row['guidance_questions'],
+                            max_questions=row['max_questions'])
+                ss.chat_coach.add_prompt(topic_prompt)
+                change_state('questions')
 
 
 def handle_topic_questions():
@@ -227,16 +214,27 @@ def handle_topic_questions():
     """
     global model_response_display, ss
     display_headers()
-    if ss.model_reply == "":
+    if ss.chat_coach.model_reply == "":
         model_response_display = st.empty()
-        update_model_response()
+        ss.chat_coach.update_response(model_response_display)
     else:
-        model_response_display = st.markdown(ss.model_reply)
-    if ss.counts <= ss.topic_prompts.loc[ss.current_topic['name'], 'max_questions']:
-        ss.user_reply = st.text_area("Response:", label_visibility='collapsed',
+        model_response_display = st.markdown(ss.chat_coach.model_reply)
+
+    if ss.counts <= ss.topics.loc[ss.user_session.active_topic, 'max_questions']:
+        ss.chat_coach.user_reply = st.text_area("Response:", label_visibility='collapsed',
                                      placeholder="Take your time to think about your reply.",
                                      key='reply')
-    st.button("Next", on_click=next_coaching_question, type='primary')
+
+        st.button("Next", on_click=next_coaching_question, type='primary')
+    else:
+        st.button("Back to summary", on_click=back_to_summary, type='primary')
+
+
+def get_text_area_height(text, min_height=25, max_height=1000, padding=20, chars_per_line=75):
+    """Estimate the height of the textarea based on the number of characters in the text."""
+    lines = len(text) // chars_per_line + 1
+    height = min(max(lines * padding, min_height), max_height)
+    return height
 
 
 def handle_summary():
@@ -245,75 +243,36 @@ def handle_summary():
     """
     global model_response_display, ss
     render_logo()
-    display_headers()
-    actions = []
-    response = ['Error: No actions loaded...']
-    if ss.model_reply == "":
-        model_response_display = st.empty()
-        update_model_response()
+    st.header(ss.summaries.loc[ss.user_session.active_summary, 'name'])
+
+    if ss.user_session.summaries[ss.user_session.active_summary]['summary'] == "":
+        local_model_response_display = st.empty()
+        ss.chat_coach.update_response(local_model_response_display)
+        ss.user_session.summaries[ss.user_session.active_summary]['summary'] = ss.chat_coach.model_reply
         st.experimental_rerun()
     else:
-        response = ss.model_reply.split('::Action::')
-        model_response_display = st.markdown(response[0])
+        default_text = ss.user_session.summaries[ss.user_session.active_summary]['summary']
 
-        for i, action in enumerate(response[1:]):
-            action_text = action.strip()
-            actions.append("")
-            actions[i] = st.text_area(label=str(i), label_visibility='collapsed', value=action_text)
-    col1, col2 = st.columns(2)
-    with col1:
-        email_address = st.text_input("Email address", label_visibility='collapsed', placeholder="Enter your email")
-        if st.button("Send me a copy", type='primary'):
+        ss.user_session.summaries[ss.user_session.active_summary]['summary'] \
+            = st.text_area('Edit:', value=default_text,
+                           height=get_text_area_height(default_text))
 
-            action_bullets = get_action_bullets(actions)
-
-            html_blocks = {
-                '{summary}': github_markup_to_html(response[0]),
-                '{actions}': github_markup_to_html(action_bullets)
-            }
-
-            html_file_path = 'email_template.html'
-
-            updated_html = add_html_blocks(html_file_path, html_blocks)
-
-            if send_email("Career Coach - Discussion Summary and Actions", updated_html, email_address):
-                st.text("Email sent!")
-            else:
-                st.text("Problem with email address provided. Email not sent.")
-    with col2:
-        ss.current_topic['name'] = \
-            st.selectbox(label="What topic would you like to discuss?",
-                         options=ss.topic_prompts.index.tolist(), label_visibility='collapsed')
-
-        if st.button("Discuss another topic"):
-            ss.counts = 1
-            change_state('Topic Selection')
+    if st.button("Back to Summary"):
+        change_state('intro')
 
 
-LOGO_PATH = 'AIA_Group_logo.png'
-COMPANY = 'AIA'
-
-# Initiate states and variables
-st.set_page_config(page_title=f"{COMPANY} Career Coach", page_icon=":star2:", layout="centered",
+LOGO_PATH = ''
+st.set_page_config(page_title=f"IMAGINE", page_icon=":star2:", layout="centered",
                    initial_sidebar_state="collapsed", menu_items=None)
 
-ss = st.session_state
-
 # Initiate streamlit states
+ss = st.session_state
 initiate_states()
 
 state_functions = {
-    "Intro": handle_intro,
-    "About You": handle_about_you,
-    "Topic Selection": handle_topic_selection,
-    "Topic Questions": handle_topic_questions,
-    "Summary": handle_summary,
+    "intro": handle_intro,
+    "questions": handle_topic_questions,
+    "summary": handle_summary,
 }
 
 state_functions[ss.state]()
-
-
-
-
-
-
